@@ -1,0 +1,454 @@
+---
+title: "Overview of SPRINT data"
+output: html_document
+runtime: shiny
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list=ls())
+library(knitr)
+library(tidyr)
+library(plyr)
+library(dplyr)
+library(plotly)
+library(ggplot2)
+library(tableone)
+library(gmodels)
+library(survival)
+library(reshape2)
+
+setwd("~/Documents/Other/Kevin Quach Personal/SPRINT/sprint_pop/data/")
+load(file = "Sprint.Rdata")
+setwd("~/Documents/Other/Kevin Quach Personal/SPRINT/sprint_pop/markdown/")
+
+# Functions
+
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+```
+prepared by Kevin Quach
+
+## Introduction
+I present below an overview of the SPRINT data. We were provided with baseline, blood pressure, safety, retention, and outcomes data from the SPRINT trial. This overview taps into each of the data sets provided to evoke questions for the next round of competition. With regards to the answers to the SPRINT initial challenge questions, I have provided answers for both questions using R, SAS, and Stata. Only one question needs to be submitted to advance to the following round.
+
+To see the SPRINT paper, visit
+<http://www.nejm.org/doi/pdf/10.1056/NEJMoa1511939>.
+
+There are 3 sections in this overview.  
+1. Baseline Characteristics: To compare analyzed data with published results and to establish precedent that SPRINT data is being used   
+2. Answers to NEJM Sprint Data Challenge    
+3. Exploration of Data   
+(i) Distribution of Clinical Characteristics by Groups   
+(ii) Missing Data (Covariates, Outcomes)   
+(iii) Patient Retention   
+(iv) Safety Outcomes
+
+
+
+### (a) Baseline Characteristics
+
+Below, we show that the data available to us is equivalent to the one published in SPRINT. Our brief Table 1 shows select baseline characteristics between published SPRINT data obtained and SPRINT Table 1. See [NEJM SPRINT Table 1](http://i.imgur.com/NWs6dbj.png) for comaprison (Source: NEJM).
+
+<!-- 
+  ```{r baseline}
+ddply(baseline, .(INTENSIVE), summarise,
+      nGroup = length(INTENSIVE),
+      femalePerc = sum(FEMALE),
+      age = round(mean(as.numeric(AGE)),1),
+      raceBlack = sum(RACE_BLACK),
+      baselineSBP = round(mean(SBP),1),
+      baselineDBP = round(mean(DBP),1),
+      sCr = round(mean(SCREAT, na.rm = TRUE),2))
+``` 
+-->
+  
+```{r tableone, echo = FALSE}
+# Data Manipulation
+baseline <- baseline %>%
+              mutate(TRT_GRP = ifelse(INTENSIVE == 0, "Standard Trt", "Intensive Trt")) %>%
+              mutate(AGEOVER75 = ifelse(AGE >= 75, 1, 0)) %>%
+              mutate(FRAMINGHAM15 = ifelse(RISK10YRS >= 15, 1, 0)) %>%
+              mutate(RACE = RACE4)
+              
+vars <- c("FEMALE", "AGE", "RACE", "RACE_BLACK", "SBP", "DBP")
+tableone <- CreateTableOne(data = baseline, vars = vars, strata = c("TRT_GRP"), factorVars = c("FEMALE", "RACE4", "RACE_BLACK"))
+print(tableone, contDigits = 1, test = FALSE)
+```
+
+*Trt: treatment; SBP: systolic blood pressure; DBP: diastolic blood pressure; EGFR: estimated glomerular filtration rate; SCREAT: serum creatinine; BMI: body mass index
+
+### (b) Answers to NEJM Sprint Data Challenge
+
+Having shown that the data is equivalent to SPRINT, we proceed to answer the two questions in the initial challenge. Recall that only one of the answers is required for submission. It is my opinion that Question 1 is most valid for submission since the interpretation of the question is clear. The answer to the sample size of the second question depends on how it is interpreted.
+
+**Question 1**: What is the log likelihood ratio statistic for the Cox proportional hazards model described in Table 2 of the NEJM article for the primary outcome (first occurrence of myocardial infarction, acute coronary syndrome, stroke, heart failure, or death from cardiovascular causes)?
+
+**Answer**:
+
+```{r answerQ1table, echo = FALSE}
+
+# QUESTION 1
+###########################
+
+# Merge baseline with outcomes
+survDF <- outcomes %>% select(MASKID, EVENT_PRIMARY, T_PRIMARY) %>% left_join(arm, by = "MASKID")
+
+# Descriptive statistics
+# CrossTable(survDF$EVENT_PRIMARY, survDF$INTENSIVE, exclude = NULL, prop.r = FALSE, prop.t = FALSE, # prop.chisq = FALSE)
+```
+
+```{r answerQ1loglikelihood, echo = FALSE}
+# Log likelihood
+lifetable <- coxph(Surv(T_PRIMARY, EVENT_PRIMARY) ~ 1, data = survDF)
+summary(lifetable)
+```
+
+The log likelihood is *-5024.253*. Log likelihood estimates from SAS and Stata are *-5024.27* and *-5018.761*, respectively.
+
+```{r answerQ1coxHR, echo = FALSE}
+# COX PH Model
+coxph <- coxph(Surv(T_PRIMARY, EVENT_PRIMARY) ~ INTENSIVE, data = survDF, method = "breslow")
+coxph
+```
+
+The Hazards Ratio for patients experiencing the primary outcome if they were receiving more intensive blood pressure treatment is 0.75.
+
+**Question 2**: What is the sample size and the mean for the systolic blood pressure at the last recorded [post-baseline] study visit for each participant by treatment arm (Intensive and Standard)?
+
+**Answer**:
+
+```{r answerQ2, echo = FALSE}
+
+# QUESTION 2
+###########################
+
+###########################
+# Some considerations for data exclusion and manipulation
+# Must be:
+#   1. Post-baseline
+###########################
+
+# Apply considerations
+bp1 <- bp %>% 
+  arrange(MASKID, desc(visitMonth)) %>% 
+  filter(visitMonth != 0) %>% # must have 1. SBP value, 2. Cannot be baseline
+  left_join(arm, by = "MASKID") 
+
+# Retain last visit for BP calculation
+bp1 <- bp1[!duplicated(bp1$MASKID),] # takes last follow-up visit
+
+# SUMMARY of group + mean SBP
+q2a <- ddply(bp1, c("INTENSIVE"), summarise,
+              Total = length(INTENSIVE),
+              SBP_Recorded = length(SBP[!is.na(SBP)]),
+              SBP_Missing = length(SBP[is.na(SBP)]),
+              Mean = round(mean(as.numeric(SBP), na.rm = TRUE),1),
+              SD = round(sd(as.numeric(SBP), na.rm = TRUE),1)
+          ) %>% 
+        mutate(TrtArm = factor(INTENSIVE, levels = c(0,1), labels = c("Control", "Treatment"))) %>%
+        select(TrtArm, Total, SBP_Recorded, SBP_Missing, Mean, SD)
+
+##########################
+# Final Table
+##########################
+kable(q2a)
+
+```
+
+Among 9,361 patients enrolled in the SPRINT study, 9,249 (98.8%) patients had post-baseline follow-up visit. 10 of 9,249 (0.11%) had no SBP measurements at baseline. Therefore, there were 4,628 patients in the treatment group (with intensive BP therapy) with recorded SBP with a mean (SD) of 119.9 (14.2) mmHg. In contrast, there were 4,612 patients in the control group with recorded SBP with a mean of 133.9 (13.7) mmHg.
+
+Answers are identical when computed with Stata and SAS.
+
+* SBP: Systolic Blood Pressure; TrtArm: Treatment Arm
+
+## 3. Exploration of Data
+
+### (i) Distribution of Clinical Characteristics by Groups
+
+Below are boxplots of 8 clinical characteristics, stratified by **treatment group**.
+
+```{r clinChar1, echo=FALSE, warning=FALSE}
+
+outcomesPRIMARY <- outcomes %>% select(MASKID, EVENT_PRIMARY)
+baselineOutcomes <- baseline %>% left_join(outcomesPRIMARY, by = "MASKID") %>%
+                mutate(TrtGrp = factor(INTENSIVE, levels = c(0,1), labels = c("CTR","TRT"))) %>%
+                mutate(PrimaryOutcome = factor(EVENT_PRIMARY, levels = c(0,1), labels = c("No Event","Event")))
+
+p1 <- ggplot(baselineOutcomes, aes(TrtGrp, SBP)) + geom_boxplot() + xlab("Treatment Group")
+p2 <- ggplot(baselineOutcomes, aes(TrtGrp, BMI)) + geom_boxplot() + xlab("Treatment Group")
+p3 <- ggplot(baselineOutcomes, aes(TrtGrp, EGFR)) + geom_boxplot() + xlab("Treatment Group")
+p4 <- ggplot(baselineOutcomes, aes(TrtGrp, SCREAT)) + geom_boxplot() + xlab("Treatment Group")
+p5 <- ggplot(baselineOutcomes, aes(TrtGrp, TRR)) + geom_boxplot() + xlab("Treatment Group")
+p6 <- ggplot(baselineOutcomes, aes(TrtGrp, HDL)) + geom_boxplot() + xlab("Treatment Group")
+p7 <- ggplot(baselineOutcomes, aes(TrtGrp, CHR)) + geom_boxplot() + xlab("Treatment Group")
+p8 <- ggplot(baselineOutcomes, aes(TrtGrp, GLUR)) + geom_boxplot() + xlab("Treatment Group")
+
+multiplot(p1, p2, p3, p4, p5, p6, p7, p8, cols = 4)
+
+```
+
+Below are boxplots of the same eight clinical characteristics, stratified by **primary outcome**.
+
+```{r clinChar2, echo=FALSE, warning=FALSE}
+
+p11 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, SBP)) + geom_boxplot() + xlab("Event Status")
+p12 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, BMI)) + geom_boxplot() + xlab("Event Status")
+p13 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, EGFR)) + geom_boxplot() + xlab("Event Status")
+p14 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, SCREAT)) + geom_boxplot() + xlab("Event Status")
+p15 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, TRR)) + geom_boxplot() + xlab("Event Status")
+p16 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, HDL)) + geom_boxplot() + xlab("Event Status")
+p17 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, CHR)) + geom_boxplot() + xlab("Event Status")
+p18 <- ggplot(baselineOutcomes, aes(PrimaryOutcome, GLUR)) + geom_boxplot() + xlab("Event Status")
+
+multiplot(p11, p12, p13, p14, p15, p16, p17, p18, cols = 4)
+
+# CODE BELOW IS A RENDER PLOT THAT HAS YET TO WORK
+# 
+# inputPanel(
+#   selectInput(inputId = "var", label =  "Select a clinical characteristic:", choices = c("SBP", "DBP"), selected = "SBP")
+# )
+# 
+# renderPlot(
+#     # qplot(factor("INTENSIVE"), input$var1, data = baselineOutcomes, geom = "boxplot")
+#     ggplot(baselineOutcomes, aes(factor("INTENSIVE", levels = c(0,1), labels = c("CTR", "TRT")), input$var, stat = "identity")) + 
+#           geom_boxplot() + 
+#           xlab("Treatment Group")
+# )
+```
+
+It is interesting to note that patients who experienced the primary outcome had lower SBP, lower eGFR, higher TRR, higher serum creatinine, and lower HDL, with the difference in means assessed by the t-test.
+
+```{r clinChar3, include=FALSE, warning=FALSE}
+t.test(SBP ~ PrimaryOutcome, data = baselineOutcomes) # 0.02
+t.test(EGFR ~ PrimaryOutcome, data = baselineOutcomes) # < 0.01
+t.test(TRR ~ PrimaryOutcome, data = baselineOutcomes) # 0.03
+t.test(CHR ~ PrimaryOutcome, data = baselineOutcomes) # 0.09
+t.test(BMI ~ PrimaryOutcome, data = baselineOutcomes) # 0.11
+t.test(SCREAT ~ PrimaryOutcome, data = baselineOutcomes) # < 0.01
+t.test(HDL ~ PrimaryOutcome, data = baselineOutcomes) # < 0.01
+t.test(GLUR ~ PrimaryOutcome, data = baselineOutcomes) # 0.21
+```
+
+```{r clinChar4, echo=FALSE, warning=FALSE}
+kable(
+  cbind(
+    ddply(baselineOutcomes, .(PrimaryOutcome), summarize, 
+      `SBP (mmHg)` = round(mean(SBP, na.rm = TRUE),2),
+      `EGFR (mL/min/1.73m^2)` = round(mean(EGFR, na.rm = TRUE),2),
+      `TRR (mg/dL)` = round(mean(TRR, na.rm = TRUE),2),
+      `CHR (mg/dL)`= round(mean(CHR, na.rm = TRUE),2),
+      `BMI` = round(mean(BMI, na.rm = TRUE),2),
+      `SCREAT (mg/dL)` = round(mean(SCREAT, na.rm = TRUE),2),
+      `HDL (mg/dL)` = round(mean(HDL, na.rm = TRUE),2),
+      `GLUR (mg/dL)` = round(mean(GLUR, na.rm = TRUE),2)
+      ) %>% 
+              melt(id.vars = c("PrimaryOutcome")) %>%
+              dcast(variable ~ PrimaryOutcome, value.vars = c("value")) %>%
+              mutate(Variable = variable) %>%
+              select(Variable, `No Event`, Event, -variable),
+    data.frame(Pvalue = c("0.02", "<0.01", "0.03", "0.09", "0.11", "<0.01", "<0.01", "0.21"))
+)
+)
+```
+
+* SBP: systolic blood pressure; eGFR: estimated glomerular filtration rate; TRR: triglycerides; CHR: cholesterol; BMI: body mass index; SCREAT: serum creatinine; HDL: high-density lipoprotein; GLUR: glucose
+
+### (ii) Missing Data
+
+##### Covariates
+
+The table below describes the number of patients with missing covariates.
+
+```{r missingData0, echo = FALSE}
+missingData0 <- ddply(baselineOutcomes, .(INTENSIVE), summarize,
+  SBP = length(SBP[is.na(SBP)]),
+  AntiHypertensives = length(N_AGENTS[is.na(N_AGENTS)]),
+  SmokingStatus = length(SMOKE_3CAT[is.na(SMOKE_3CAT)]),
+  DailyAspirinUse = length(ASPIRIN[is.na(ASPIRIN)]),
+  eGFR = length(EGFR[is.na(EGFR)]),
+  SerumCreatinine = length(SCREAT[is.na(SCREAT)]),
+  Age = length(AGE[is.na(AGE)]),
+  Gender = length(FEMALE[is.na(FEMALE)]),
+  HxClinicalSVD = length(SUB_CLINICALCVD[is.na(SUB_CLINICALCVD)]),
+  HxSubclinicalCVD = length(SUB_SUBCLINICALCVD[is.na(SUB_SUBCLINICALCVD)]),
+  Race = length(RACE4[is.na(RACE4)]),
+  Cholesterol = length(CHR[is.na(CHR)]),
+  Glucose = length(GLUR[is.na(GLUR)]),
+  HDL = length(HDL[is.na(HDL)]),
+  Triglycerides = length(TRR[is.na(TRR)]),
+  UrineAlbuminCreatinineRatio = length(UMALCR[is.na(UMALCR)]),
+  BMI = length(BMI[is.na(BMI)]),
+  StatinTherapy = length(STATIN[is.na(STATIN)])
+)
+
+missingData0a <- melt(missingData0, id.vars = c("INTENSIVE"))
+missingData0b <- dcast(missingData0a, variable ~ INTENSIVE, value.var="value") %>%
+                mutate(Variable = variable) %>%
+                mutate(CTR = `0`) %>%
+                mutate(TRT = `1`) %>%
+                select(-`0`, -`1`, -variable)
+
+kable(missingData0b)
+```
+
+##### Outcomes
+
+The table below describes the number of patients with missing outcomes. Although none of the primary outcomes are missing, there are a number of patients (as you will see below) who dropped out of the study early on.
+
+```{r missingData1, echo = FALSE}
+outcomes <- outcomes %>% left_join(arm, by = "MASKID")
+
+missingDataOutcomes <- ddply(outcomes, .(INTENSIVE), summarize,
+  PrimaryOutcome = length(EVENT_PRIMARY[is.na(EVENT_PRIMARY)]),
+  MyocardialInfarction= length(EVENT_MI[is.na(EVENT_MI)]),
+  NonMIAcuteCoronarySyndrome= length(EVENT_NONMIACS[is.na(EVENT_NONMIACS)]),
+  Stroke= length(EVENT_STROKE[is.na(EVENT_STROKE)]),
+  HeartFailure= length(EVENT_HF[is.na(EVENT_HF)]),
+  CVD_Death= length(EVENT_CVDDEATH[is.na(EVENT_CVDDEATH)]),
+  All_Death= length(EVENT_DEATH[is.na(EVENT_DEATH)]),
+  CompositeRenalOutcome  = length(EVENT_CKDCOMPOSITE[is.na(EVENT_CKDCOMPOSITE)]),
+  GFR_FiftyPercReduction= length(EVENT_50PERCENTREDUCTION_EGFR[is.na(EVENT_50PERCENTREDUCTION_EGFR)]),
+  LongTermDialysis = length(EVENT_DIALYSIS[is.na(EVENT_DIALYSIS)]),
+  Albuminuria = length(EVENT_ALBUMINURIA_CKD[is.na(EVENT_ALBUMINURIA_CKD)])
+)
+
+missingDataOutcomesA <- melt(missingDataOutcomes, id.vars = c("INTENSIVE"))
+missingDataOutcomesB <- dcast(missingDataOutcomesA, variable ~ INTENSIVE, value.var="value") %>%
+                mutate(Outcome = variable) %>%
+                mutate(CTR = `0`) %>%
+                mutate(TRT = `1`) %>%
+                select(-`0`, -`1`, -variable)
+
+kable(missingDataOutcomesB)
+
+```
+
+### (iii) Patient Retention
+
+The table below describes the participant status at end of intervention, by *treatment group*.
+
+```{r retention, echo = FALSE}
+retention <- retention %>% left_join(arm, by = "MASKID")
+retention <- retention %>% mutate(TrtGrp = factor(INTENSIVE, levels = c(0,1), labels = c("CTR","TRT")))
+
+kable(table(retention$TrtGrp, retention$STATUS))
+```
+
+**BP Active** is defined as patient BP and antihypertensive therapy managed by study.   
+**BP Inactive** is defined as patient BP and antihypertensive therapy NOT managed by study.   
+**LTFU** is defined as participant missing last two consecutive study visits and cannot be contacted.   
+**Withdrawn consent** also implies that patients refuses further contact from SPRINT staff.   
+
+##### Number of Total Follow-up Visits (measured by BP) per Patient
+
+The majority of patients across both treatment groups have 12 to 20 total visits in the SPRINT study. However, there is a sizeable group that have less than 5 study visits.
+
+```{r missingData2, echo = FALSE}
+bpArm <- bp %>% 
+  left_join(arm, by = "MASKID") 
+
+bpVisitCount <- ddply(bpArm, .(MASKID), summarize,
+      VisitCount = length(VISITCODE)) %>% left_join(arm, by = "MASKID") %>%
+      mutate(TrtGrp = factor(INTENSIVE, levels = c(0,1), labels = c("CTR","TRT")))
+
+p <- ggplot(data = bpVisitCount, aes(x = VisitCount, fill = TrtGrp)) + geom_bar() + xlab("Visit Count") + ylab("Count")
+
+ggplotly(p)
+
+```
+
+Below, we explore the retention of patients who have 5 of fewer study visits.
+
+```{r missingData3, echo = FALSE}
+bpRetentionLTFive <- bpVisitCount %>% left_join(retention, by = "MASKID")
+
+kable(table(bpRetentionLTFive$STATUS, bpRetentionLTFive$TrtGrp.x))
+```
+
+There seems to be a slightly increased incidence of deaths among the control group.
+
+### (iv) Serious Adverse Events
+
+```{r safety1, echo = FALSE}
+safety <- safety %>% left_join(arm, by = "MASKID")
+
+safetyOutcomes <- ddply(safety, .(INTENSIVE), summarize,
+      SAE = sum(SAE_EVNT),
+      REL = sum(REL_SAE_EVNT),
+      HYP = sum(HYP_SAE_EVNT),
+      SYN = sum(SYN_SAE_EVNT),
+      BRA = sum(BRA_SAE_EVNT),
+      ELE = sum(ELE_SAE_EVNT),
+      INJ = sum(INJ_SAE_EVNT),
+      AKI = sum(AKI_SAE_EVNT),
+      HYP_ER = sum(HYP_ERS_EVNT),
+      SYN_ER = sum(SYN_ERS_EVNT),
+      BRA_ER = sum(BRA_ERS_EVNT),
+      ELE_ER = sum(ELE_ERS_EVNT),
+      INJ_ER = sum(INJ_ERS_EVNT),
+      AKI_ER = sum(AKI_ERS_EVNT),
+      LowNA = sum(LON_MCE_EVNT),
+      HighNA = sum(HIN_MCE_EVNT),
+      LowK = sum(LOK_MCE_EVNT),
+      HighK = sum(HIK_MCE_EVNT),
+      ALO = sum(ALO_OHO_EVNT),
+      WDZ = sum(WDZ_OHO_EVNT)
+) %>% 
+                      melt(id.vars = "INTENSIVE") %>%
+                      dcast(variable ~ INTENSIVE, value.var = "value") %>%
+                mutate(SafetyOutcome = variable) %>%
+                mutate(CTR = `0`) %>%
+                mutate(TRT = `1`) %>%
+                select(-variable, -`0`, -`1`)
+
+kable(safetyOutcomes)
+
+```
+
+* SAE: serious adverse event; REL: related SAE; HYP: hypotension; SYN: syncope; BRA: bradycardia; ELE: electrolyte abnormality; INJ: injurious fall; AKI: acute kidney injury; '_ER': SAE OR ER visit; LowNA: low sodium; HighNA: high sodium; LowK: low potassium; HighK: high potassium; ALO: orthostatic hypotension without dizziness; WDZ: orthostatic hypotension with dizziness
